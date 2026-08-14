@@ -12,6 +12,7 @@ curl -fsSL https://raw.githubusercontent.com/gethibiki/cli/main/install.sh | sh
 > below uses it. It starts answering the moment the Worker in
 > `infra/cli-installer/` is first deployed — the route creates the hostname —
 > and until then the raw URL above is the same script from the same branch.
+> See [#1](https://github.com/gethibiki/cli/issues/1).
 
 ```bash
 hibiki login              # paste an API key from Settings → API Keys
