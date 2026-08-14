@@ -1,0 +1,76 @@
+name: Deploy CLI installer Worker
+
+# Auto-deploys the Cloudflare Worker at cli.gethibiki.com whenever the Worker
+# source or its config changes on main. Also picks up refreshes to install.sh —
+# the Worker proxies that file from raw.githubusercontent with a 5-minute edge
+# cache, and a Wrangler deploy invalidates the cache immediately, so a fix
+# ships at deploy time rather than five minutes later.
+#
+# Required repo secret:
+#   CLOUDFLARE_API_TOKEN — scoped to the gethibiki.com zone with
+#                          "Workers Scripts: Edit" + "Account Workers
+#                          Routes: Edit". Create at:
+#                          https://dash.cloudflare.com/profile/api-tokens
+#
+# Optional secret (only when the account owns multiple zones and Wrangler
+# cannot infer the right one):
+#   CLOUDFLARE_ACCOUNT_ID — visible in the Cloudflare dashboard sidebar.
+#
+# Security: no untrusted input reaches a `run:` step, and secrets are consumed
+# by the action through its own inputs rather than expanded inline. The Worker
+# has no bindings, so a compromised deploy cannot exfiltrate anything.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/cli-installer/**"
+      - "install.sh"
+      - ".github/workflows/deploy-cli-installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One in-flight deploy at a time; if two pushes land together, the older run is
+# cancelled so the newest source wins.
+concurrency:
+  group: deploy-cli-installer
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          # Pinned so a deploy doesn't break on an upstream CLI change.
+          wranglerVersion: "4.30.0"
+          workingDirectory: infra/cli-installer
+          command: deploy
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Smoke test the live endpoint
+        env:
+          INSTALLER_URL: https://cli.gethibiki.com
+        run: |
+          # Programmatic request: should return a shell script starting with #!
+          BODY="$(curl -fsSL --retry 3 --max-time 15 "$INSTALLER_URL" | head -1)"
+          case "$BODY" in
+            "#!"*) echo "OK — installer returns: $BODY" ;;
+            *) echo "::error::installer did not return a shell script. First line: $BODY"; exit 1 ;;
+          esac
+
+          # Browser-style request: should 302 to the docs page.
+          REDIRECT="$(curl -sSI --retry 3 --max-time 15 \
+            -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' \
+            "$INSTALLER_URL" | awk '/^location:/ {print $2}' | tr -d '\r')"
+          case "$REDIRECT" in
+            https://github.com/gethibiki/cli*) echo "OK — browser redirect: $REDIRECT" ;;
+            "") echo "::warning::browser request received no redirect (Worker may still be propagating)" ;;
+            *) echo "::warning::unexpected browser redirect target: $REDIRECT" ;;
+          esac

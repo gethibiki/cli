@@ -1,0 +1,27 @@
+# Cloudflare Worker config for the CLI installer at cli.gethibiki.com.
+#
+# Deploy from this directory:
+#   cd infra/cli-installer
+#   npx wrangler@latest login            # one-time, opens a browser to auth
+#   npx wrangler@latest deploy           # uploads worker.js
+#
+# CI does this on every push to main that touches the worker or install.sh —
+# see .github/workflows/deploy-cli-installer.yml. Nothing here needs secrets.
+
+name = "hibiki-cli-installer"
+main = "worker.js"
+
+# Pin the runtime date so a deploy on a quiet day doesn't break because of an
+# upstream runtime upgrade. Bump deliberately.
+compatibility_date = "2026-04-01"
+
+# Route the cli.gethibiki.com hostname through this worker. The zone must
+# already exist on the Cloudflare account (the apex gethibiki.com one).
+# "*" catches every path; the worker filters internally.
+routes = [
+  { pattern = "cli.gethibiki.com/*", zone_name = "gethibiki.com" }
+]
+
+# No KV / D1 / R2 bindings — the worker proxies one GitHub raw URL with edge
+# caching, and holds nothing. If version pinning or install telemetry ever
+# arrives, the binding declarations go here.
